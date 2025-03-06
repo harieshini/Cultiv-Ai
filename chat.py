@@ -1,109 +1,260 @@
 import streamlit as st
 import google.generativeai as genai
 import os
-from dotenv import load_dotenv
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import cv2
+import numpy as np
+import tempfile
+from dotenv import load_dotenv
+from PIL import Image
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+from faster_whisper import WhisperModel
 
-# Load API key from .env file for Gemini API
+# --- Page Configuration (MUST BE FIRST) ---
+st.set_page_config(page_title="CULTIV AI", page_icon="🌾", layout="centered")
+
+# --- Configuration & Imports ---
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-if not api_key:
-    st.error("API key is missing! Set it in the .env file.")
-    st.stop()
+# --- Model Loading ---
+@st.cache_resource
+def load_models():
+    return {
+        "classifier": {
+            "tokenizer": AutoTokenizer.from_pretrained("smokxy/agri_bert_classifier-quantized"),
+            "model": AutoModelForSequenceClassification.from_pretrained("smokxy/agri_bert_classifier-quantized")
+        },
+        "whisper": WhisperModel("small", device="cuda" if torch.cuda.is_available() else "cpu", compute_type="int8"),
+        "gemini-vision": genai.GenerativeModel('gemini-1.5-flash'),
+        "gemini-text": genai.GenerativeModel('gemini-pro')
+    }
 
-# Configure Gemini API with your API key
-genai.configure(api_key=api_key)
+models = load_models()
 
-# --- Load the Agriculture Classifier Model ---
-tokenizer = AutoTokenizer.from_pretrained("smokxy/agri_bert_classifier-quantized")
-classifier_model = AutoModelForSequenceClassification.from_pretrained("smokxy/agri_bert_classifier-quantized")
+# --- UI Configuration ---
+st.markdown("""
+    <style>
+    .stApp {
+            background-size: cover;
+            backdrop-filter: blur(2px);}
+    .stChatInputContainer {background: rgba(255, 255, 255, 0.9)!important;}
+    .stMarkdown {color: #1a4a3c;}
+    .sidebar .sidebar-content {background: rgba(245, 245, 245, 0.95)!important;}
+    .uploaderLabel {font-size: 0.85rem; margin-bottom: 3px;}
+    </style>
+""", unsafe_allow_html=True)
 
-# (Optional) Define a label mapping based on your classifier's training.
-# Adjust these labels as needed.
-label_mapping = {
-    0: "Soil Testing",
-    1: "Pest Detection",
-    2: "Crop Management",
-    3: "Irrigation",
-    4: "Harvesting",
-    5: "Government Schemes"
+# --- Language Setup ---
+LANG_CONFIG = {
+    "English": {
+        "title": "🌱 CULTIV - AI Farming Assistant",
+        "tabs": ["💬 Chat", "📸 Media Input"],
+        "prompts": {
+            "system": "You are an agricultural expert specializing in Tamil Nadu. Provide detailed advice in English about: ",
+            "placeholder": "Ask about crops, soil, or schemes..."
+        },
+        "labels": {
+            "image": "Upload Field Photo",
+            "audio": "Record Voice Query",
+            "video": "Upload Field Video"
+        }
+    },
+    "தமிழ்": {
+        "title": "🌱 CULTIV - AI விவசாய உதவியாளர்",
+        "tabs": ["💬 அரட்டை", "📸 ஊடக உள்ளீடு"],
+        "prompts": {
+            "system": "தமிழ்நாடு விவசாயத்தில் நிபுணத்துவம் பெற்ற ஒரு AI உதவியாளர். தமிழில் விரிவான ஆலோசனைகளை வழங்குக: ",
+            "placeholder": "பயிர்கள், மண், அரசுத் திட்டங்கள் பற்றிக் கேளுங்கள்..."
+        },
+        "labels": {
+            "image": "வயல் படத்தை பதிவேற்றம் செய்க",
+            "audio": "குரல் கேள்வியை பதிவு செய்க",
+            "video": "வயல் வீடியோவை பதிவேற்றம் செய்க"
+        }
+    }
 }
 
-# Function to classify the user's query using the AgriBERT classifier.
-def classify_query(query):
-    inputs = tokenizer(query, return_tensors="pt", truncation=True, max_length=512)
+# --- Core Functions ---
+def process_image(image_file):
+    # Check if we've already processed this exact file
+    if "last_image" in st.session_state:
+        if (st.session_state.last_image["name"] == image_file.name and
+            st.session_state.last_image["size"] == image_file.size):
+            return None
+    st.session_state.last_image = {
+        "name": image_file.name,
+        "size": image_file.size
+    }
+    return Image.open(image_file)
+
+def classify_query(text, lang):
+    inputs = models["classifier"]["tokenizer"](text, return_tensors="pt", truncation=True, max_length=512)
     with torch.no_grad():
-        outputs = classifier_model(**inputs)
-    # Apply softmax to get probabilities.
+        outputs = models["classifier"]["model"](**inputs)
     probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
-    predicted_class = torch.argmax(probs, dim=-1).item()
-    confidence = probs[0, predicted_class].item()
-    label = label_mapping.get(predicted_class, "General Agriculture")
-    return label, confidence
+    return torch.argmax(probs).item(), probs.max().item()
 
-# Function to interact with the Gemini API.
-def chat_with_gemini(prompt, language, classification_info):
+def transcribe_audio(audio_file, lang):
     try:
-        model = genai.GenerativeModel("gemini-pro")
-        # Base prompt with agriculture expertise.
-        base_prompt = (
-            "You are an expert in agriculture with extensive knowledge gained from a "
-            "large, curated dataset covering soil testing, pest detection, crop management, "
-            "irrigation, harvesting, and local Tamil Nadu government financial aids, farming schemes, "
-            "and subsidies. Your responses should provide detailed and accurate information to help "
-            "improve productivity, income, food security, and double agricultural output. "
-        )
-        # Append the classifier context.
-        base_prompt += f"\n\nThe user's query has been classified as related to: {classification_info}.\n\n"
-        # Append language-specific instruction.
-        language_prompt = "Please provide your response in Tamil. " if language == "தமிழ்" else "Please provide your response in English. "
-        # Final prompt combining everything.
-        full_prompt = base_prompt + language_prompt + "User query: " + prompt
-        response = model.generate_content(full_prompt)
-        return response.text
+        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+            tmp.write(audio_file.read())
+            segments, _ = models["whisper"].transcribe(
+                tmp.name, 
+                language="ta" if lang == "தமிழ்" else "en",
+                beam_size=5
+            )
+        return " ".join([segment.text for segment in segments])
     except Exception as e:
-        return f"Error: {e}"
+        return f"Transcription Error: {str(e)}"
 
-# Streamlit UI setup with language selection.
-selected_language = st.radio("Choose Language / மொழியை தேர்ந்தெடுக்கவும்", ["English", "தமிழ்"])
+def process_video(video_file):
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp:
+        tmp.write(video_file.read())
+        cap = cv2.VideoCapture(tmp.name)
+        frames = []
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret: break
+            if len(frames) % 30 == 0:
+                frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+        return frames[:3]
 
-if selected_language == "தமிழ்":
-    st.title("🌱 CULTIV - AI 🚜 - தமிழ்")
-    st.write("விவசாயம், பயிர்கள், மண் ஆரோக்கியம், பூச்சி கட்டுப்பாடு மற்றும் தமிழக அரசின் திட்டங்கள் பற்றி என்னிடம் கேளுங்கள்!")
-    placeholder_text = "விவசாயம் பற்றி கேளுங்கள்..."
-else:
-    st.title("🌱 CULTIV - AI 🚜")
-    st.write("Ask me anything about farming, crops, soil health, pest control, and Tamil Nadu government schemes!")
-    placeholder_text = "Ask me about agriculture..."
+# --- UI Components ---
+with st.sidebar:
+    lang = st.radio("🌐 Language/மொழி", ["English", "தமிழ்"], index=0)
 
-# Maintain chat history using Streamlit session state.
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+config = LANG_CONFIG[lang]
+st.title(config["title"])
 
-# Display chat history.
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# Input Tabs
+tab_chat, tab_media = st.tabs(config["tabs"])
 
-# Chat input from the user.
-user_input = st.chat_input(placeholder_text, key="user_input")
+# Chat Interface
+with tab_chat:
+    query = st.chat_input(config["prompts"]["placeholder"])
 
-if user_input:
-    # Classify the query using AgriBERT.
-    predicted_label, confidence = classify_query(user_input)
-    classification_info = f"{predicted_label} (confidence: {confidence:.2f})"
+# Media Interface
+with tab_media:
+    cols = st.columns(3)
+    with cols[0]:
+        img_file = st.file_uploader(config["labels"]["image"], type=["jpg", "png", "jpeg"])
+    with cols[1]:
+        audio_file = st.file_uploader(config["labels"]["audio"], type=["wav", "mp3"])
+    with cols[2]:
+        vid_file = st.file_uploader(config["labels"]["video"], type=["mp4", "mov"])
+
+# --- Chat History Management ---
+if "history" not in st.session_state:
+    st.session_state.history = []
+    st.session_state.last_processed = {
+        "text": None,
+        "image": None,
+        "audio": None,
+        "video": None
+    }
+
+# Display History
+for entry in st.session_state.history:
+    with st.chat_message(entry["role"]):
+        if entry["type"] == "text":
+            st.markdown(entry["content"])
+        elif entry["type"] == "media":
+            if entry["mtype"] == "image":
+                st.image(entry["content"])
+            elif entry["mtype"] == "video":
+                st.video(entry["content"])
+
+# --- Processing Logic ---
+def generate_response(prompt, media=None):
+    class_id, confidence = classify_query(prompt, lang)
+    prompt_template = f"{config['prompts']['system']} (Confidence: {confidence:.0%})"
     
-    # Append and display user's message.
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
+    if media:
+        response = models["gemini-vision"].generate_content([prompt_template + prompt, media])
+    else:
+        response = models["gemini-text"].generate_content(prompt_template + prompt)
     
-    # Get the response from Gemini, including classifier context.
-    bot_response = chat_with_gemini(user_input, selected_language, classification_info)
-    st.session_state.messages.append({"role": "assistant", "content": bot_response})
+    return response.text
+
+current_input = None
+media_data = None
+processed = False
+
+# Check for new inputs
+if any([query, img_file, audio_file, vid_file]):
+    # Track current inputs
+    current_media = img_file or vid_file or audio_file
     
-    # Display the assistant's response.
-    with st.chat_message("assistant"):
-        st.markdown(bot_response)
+    # Only process if new input detected
+    if current_media != st.session_state.last_processed or query != st.session_state.last_processed:
+        processed = True
+        st.session_state.last_processed = current_media or query
+        
+        # Handle Image/Video
+        if img_file:
+            media_data = process_image(img_file)
+    if media_data:  # Only process if new image
+        processed = True
+        st.session_state.history.append({
+            "role": "user",
+            "type": "media",
+            "mtype": "image",
+            "content": media_data
+        })
+    if vid_file and vid_file != st.session_state.last_processed["video"]:
+        processed = True
+        media_data = process_video(vid_file)
+        st.session_state.last_processed["video"] = vid_file
+        st.session_state.history.append({
+        "role": "user",
+        "type": "media",
+        "mtype": "video",
+        "content": vid_file
+    })
+        
+        # Handle Audio
+        if audio_file and audio_file != st.session_state.last_processed["audio"]:
+            processed = True
+            current_input = transcribe_audio(audio_file, lang)
+            st.session_state.last_processed["audio"] = audio_file
+            st.session_state.history.append({
+        "role": "user",
+        "type": "media",
+        "mtype": "audio",
+        "content": audio_file
+    })
+        
+        # Handle Text
+        if query and query != st.session_state.last_processed["text"]:
+            processed = True
+            current_input = query
+            st.session_state.last_processed["text"] = query
+            st.session_state.history.append({
+        "role": "user",
+        "type": "text",
+        "content": query
+    })
+        
+        # Generate Response
+        if processed and (current_input or media_data):
+            with st.spinner("🔍 Analyzing..." if lang == "English" else "🔍 ஆய்வு செய்கிறது..."):
+                try:
+                    response = generate_response(current_input or "", media_data)
+                    st.session_state.history.append({
+                "role": "assistant",
+                "type": "text",
+                "content": response
+            })
+                except Exception as e:
+                    st.error(f"Error: {str(e)}" if lang == "English" else f"பிழை: {str(e)}")
+    
+    # Clear file uploaders after processing
+    if img_file:
+        img_file = None
+    if audio_file:
+        audio_file = None
+    if vid_file:
+        vid_file = None
+        
+    st.rerun()
