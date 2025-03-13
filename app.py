@@ -7,6 +7,7 @@ from image import analyze_image_with_gemini
 from audio import process_audio
 from video import process_video
 from werkzeug.utils import secure_filename
+from googletrans import Translator
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
@@ -19,6 +20,9 @@ with app.app_context():
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
+# Global translator instance for language detection
+translator = Translator()
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -27,7 +31,7 @@ def index():
             user_message = request.form.get("message")
             if user_message:
                 if not is_valid_question(user_message):
-                    bot_response = "Sorry, I can only answer agriculture-related questions."
+                    bot_response = "I specialize in Agriculture."
                 else:
                     bot_response = generate_text_response(user_message)
                 # Save chat messages
@@ -47,7 +51,7 @@ def index():
                 if is_valid_question(text):
                     bot_response = generate_text_response(text)
                 else:
-                    bot_response = "Sorry, I can only answer agriculture-related questions."
+                    bot_response = "I specialize in Agriculture."
                 bot_chat = ChatMessage(role="bot", message=bot_response)
                 db.session.add(bot_chat)
                 db.session.commit()
@@ -67,7 +71,6 @@ def upload():
             filename = secure_filename(file.filename)
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
-            # Analyze the image using the Gemini Vision API
             image_analysis = analyze_image_with_gemini(file_path)
             message = f"Image analysis result: {image_analysis}"
             chat = ChatMessage(role="bot", message=message)
