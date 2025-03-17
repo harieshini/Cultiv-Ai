@@ -3,10 +3,10 @@ import google.generativeai as genai
 from config import GEMINI_API_KEY
 from googletrans import Translator
 
-# Configure API Key
+# Configure API Key for Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Initialize translator
+# Initialize translator instance
 translator = Translator()
 
 # Set up the Gemini generative model with a system instruction tailored for agriculture.
@@ -27,10 +27,10 @@ model = genai.GenerativeModel(
 
 def clean_and_localize(answer, lang):
     """
-    Remove markdown formatting, URLs, and extra whitespace.
-    Also replace key agricultural terms with colloquial Hindi or Tamil equivalents.
+    Cleans up the generated answer by removing markdown formatting, URLs, and extra whitespace.
+    Also replaces key agricultural terms with colloquial equivalents for Tamil or Hindi.
     """
-    # Remove markdown markers (e.g. **)
+    # Remove markdown markers (e.g., **)
     answer = re.sub(r'\*\*', '', answer)
     # Remove extra newlines and trim whitespace
     answer = re.sub(r'\n+', '\n', answer).strip()
@@ -76,9 +76,9 @@ def clean_and_localize(answer, lang):
 
 def is_valid_question(question):
     """
-    Uses the Gemini API to determine if a question is agriculture-related.
-    Sends a classification prompt and expects a one-word answer: 'yes' or 'no'.
-    Returns True if the answer starts with 'yes', otherwise False.
+    Determines whether the given question is agriculture-related.
+    It sends a classification prompt to the Gemini API and expects a one-word answer: 'yes' or 'no'.
+    Returns True if the answer starts with 'yes'; otherwise, False.
     """
     classification_prompt = (
         "Determine if the following question is about agriculture (covering crops, livestock, soil, irrigation, pest control, or agroeconomics). "
@@ -96,30 +96,43 @@ def is_valid_question(question):
 def generate_text_response(prompt):
     """
     Generates an answer for the given prompt using the Gemini API.
-    If the prompt includes "in tamil" or "in hindi", it forces the answer into that language.
-    The final answer is cleaned and localized for easier reading.
+    
+    Efficiency improvements:
+    - If the prompt contains "in tamil" or "in hindi", that phrase is removed and the target language is forced.
+    - If the target language is not English, the prompt is first translated into English for robust generation.
+    - The generated answer is then translated back into the target language.
+    - Finally, the answer is cleaned and key agricultural terms are localized.
+    
+    Returns the final, efficient, and easily understandable answer.
     """
     prompt_lower = prompt.lower()
+    # Check for explicit language instruction in the prompt.
     if "in tamil" in prompt_lower:
-        original_lang = "ta"
+        target_lang = "ta"
         prompt = re.sub(r"in tamil", "", prompt, flags=re.IGNORECASE).strip()
     elif "in hindi" in prompt_lower:
-        original_lang = "hi"
+        target_lang = "hi"
         prompt = re.sub(r"in hindi", "", prompt, flags=re.IGNORECASE).strip()
     else:
-        # Detect language from prompt; default to English.
         detected = translator.detect(prompt)
-        original_lang = detected.lang if detected else "en"
+        target_lang = detected.lang if detected else "en"
+    
+    # For robust generation, translate prompt to English if target language is not English.
+    if target_lang != "en":
+        prompt_en = translator.translate(prompt, dest="en").text
+    else:
+        prompt_en = prompt
 
     try:
-        response = model.generate_content(prompt)
+        response = model.generate_content(prompt_en)
         answer = response.text.strip()
     except Exception as e:
         answer = f"Error in text generation: {e}"
     
-    # If target language is Tamil or Hindi, translate the answer.
-    if original_lang in ['ta', 'hi']:
-        answer = translator.translate(answer, dest=original_lang).text
-
-    answer = clean_and_localize(answer, original_lang)
+    # If target language is not English, translate the answer back.
+    if target_lang != "en":
+        answer = translator.translate(answer, dest=target_lang).text
+    
+    # Clean and localize the final answer.
+    answer = clean_and_localize(answer, target_lang)
     return answer
