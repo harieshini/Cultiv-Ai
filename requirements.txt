@@ -1,0 +1,6 @@
+Flask
+Flask_SQLAlchemy
+python-dotenv
+google-generativeai
+SpeechRecognition
+Pillow
