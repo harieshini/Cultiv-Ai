@@ -6,7 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cultiv-Ai</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+
   <script>
+    let mediaRecorder;
+    let audioChunks = [];
+
     // Simulate typing indicator
     function showTypingIndicator() {
       document.getElementById('typing-indicator').style.display = 'block';
@@ -24,10 +28,51 @@
     }
 
     // Text-to-Speech function for bot messages
-    function speakMessage(message) {
+    function speakMessage(message, lang) {
       const utterance = new SpeechSynthesisUtterance(message);
-      utterance.lang = 'en-IN'; // Set language to English (India)
+      utterance.lang = lang || 'en-IN'; // Default to English (India)
       window.speechSynthesis.speak(utterance);
+    }
+
+    // Record audio using mic
+    async function toggleRecording() {
+      const recordBtn = document.getElementById('record-btn');
+
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            audioChunks.push(event.data);
+          };
+
+          mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'recording.wav');
+
+            // Send audio data to backend
+            await fetch('/', { method: 'POST', body: formData });
+
+            audioChunks = [];
+            hideTypingIndicator();
+            window.location.reload(); // Refresh to show response
+          };
+
+          mediaRecorder.start();
+          recordBtn.textContent = '⏹️'; // Change icon to stop button
+          showTypingIndicator();
+
+        } catch (error) {
+          console.error('Error accessing microphone:', error);
+        }
+      } else {
+        mediaRecorder.stop();
+        recordBtn.textContent = '🎙️'; // Reset to mic icon
+      }
     }
   </script>
 </head>
@@ -52,10 +97,11 @@
     <div class="chat-box" id="chat-box">
       {% for chat in chats %}
       <div class="chat-message {{ 'user' if chat.role == 'user' else 'bot' }}">
-        {{ chat.message }}
+        {{ chat.message | safe }}
         {% if chat.role == 'bot' %}
-        <!-- Add speaker button for bot messages -->
-        <button class="speak-btn" onclick="speakMessage(`{{ chat.message }}`)">🔊</button>
+          {% if '<audio' not in chat.message %}
+            <button class="speak-btn" onclick='speakMessage({{ chat.message | tojson }}, "{{ 'ta-IN' if 'தமிழ்' in chat.message else 'en-IN' }}")'>🔊</button>
+          {% endif %}
         {% endif %}
       </div>
       {% endfor %}
@@ -73,23 +119,22 @@
 
       <!-- Image Upload Form -->
       <form action="/upload" method="POST" enctype="multipart/form-data" class="upload-form">
-        <input type="file" name="file" id="file" hidden>
+        <input type="file" name="file" id="file" hidden onchange="this.form.submit()">
         <label for="file">📎</label>
       </form>
 
-      <!-- Audio Upload Form (posts to "/" for audio processing) -->
-      <form action="/" method="POST" enctype="multipart/form-data" class="audio-form">
-        <input type="file" name="audio" id="audio" hidden>
-        <label for="audio">🎙️</label>
+      <!-- Audio Upload Form (for recorded files) -->
+      <form id="audio-form" method="POST" enctype="multipart/form-data" class="audio-form">
+        <button type="button" id="record-btn" onclick="toggleRecording()">🎙️</button>
       </form>
 
       <!-- Video Upload Form -->
       <form action="/video" method="POST" enctype="multipart/form-data" class="video-form">
-        <input type="file" name="video" id="video" hidden>
+        <input type="file" name="video" id="video" hidden onchange="this.form.submit()">
         <label for="video">📹</label>
       </form>
     </div>
   </div>
-</body>
 
+</body>
 </html>
