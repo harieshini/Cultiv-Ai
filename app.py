@@ -3,7 +3,7 @@ from flask import Flask, render_template, request, redirect, url_for
 from config import UPLOAD_FOLDER, DATABASE_URI
 from models import db, ChatMessage
 from text import is_valid_question, generate_text_response
-from image import analyze_and_generate_solution
+from image import analyze_and_generate_solution, generate_follow_up_response
 from audio import process_audio
 from video import process_video
 from werkzeug.utils import secure_filename
@@ -21,7 +21,7 @@ with app.app_context():
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
-# Global translator instance for language detection (future use)
+# Global translator instance for language detection
 translator = Translator()
 
 @app.route("/", methods=["GET", "POST"])
@@ -59,32 +59,29 @@ def index():
         elif 'audio' in request.files:
             audio_file = request.files['audio']
             if audio_file:
-                # Process audio and convert to text
-                text = process_audio(audio_file)
-                user_chat = ChatMessage(role="user", message=text)
-                db.session.add(user_chat)
-
-                # Generate response based on audio text
-                if is_valid_question(text):
-                    bot_response = generate_text_response(text)
+                # Process the audio file to get the Gemini response and corresponding audio file path
+                result = process_audio(audio_file)
+                # Expecting a tuple: (gemini_response, audio_file_path)
+                if isinstance(result, tuple):
+                    gemini_response, audio_file_path = result
                 else:
-                    bot_response = "I specialize in Agriculture."
+                    gemini_response = result
+                    audio_file_path = None
 
-                # Save bot response to database
-                bot_chat = ChatMessage(role="bot", message=bot_response)
+                # Save an indicator for user audio input and the bot's response
+                user_chat = ChatMessage(role="user", message="(audio message received)")
+                db.session.add(user_chat)
+                bot_chat = ChatMessage(role="bot", message=gemini_response)
                 db.session.add(bot_chat)
-                db.session.commit()
 
-                # Convert bot response to audio
-                audio_file = save_audio(bot_response, detect_language(text))
-                if audio_file:
+                if audio_file_path:
                     audio_message = ChatMessage(
                         role="bot",
-                        message=f"<audio controls><source src='/{audio_file}' type='audio/mpeg'></audio>"
+                        message=f"<audio controls><source src='/{audio_file_path}' type='audio/mpeg'></audio>"
                     )
                     db.session.add(audio_message)
-                    db.session.commit()
 
+                db.session.commit()
                 return redirect(url_for("index"))
 
     # GET request: Show chat history
@@ -104,7 +101,7 @@ def upload():
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
 
-            # Output path for the solution image (prepend 'solution_' to the filename)
+            # Define output path for the generated solution image (prepend 'solution_' to the filename)
             solution_image_path = os.path.join(app.config['UPLOAD_FOLDER'], f"solution_{filename}")
 
             solution_text, generated_image_path = analyze_and_generate_solution(
@@ -115,7 +112,7 @@ def upload():
             bot_text_message = ChatMessage(role="bot", message=f"Solution: {solution_text}")
             db.session.add(bot_text_message)
 
-            # Save generated image to chat
+            # Save generated image to chat if generation was successful
             if generated_image_path and not generated_image_path.startswith("Error"):
                 bot_image_message = ChatMessage(
                     role="bot",
@@ -124,7 +121,21 @@ def upload():
                 db.session.add(bot_image_message)
 
             db.session.commit()
+    return redirect(url_for('index'))
 
+@app.route("/followup_image", methods=["POST"])
+def followup_image():
+    """
+    Handles follow-up queries for an image analysis.
+    The form should pass both the follow-up query and the previous context (e.g. the solution text).
+    """
+    followup_query = request.form.get("followup_query")
+    context = request.form.get("context")
+    if followup_query and context:
+        followup_response = generate_follow_up_response(context, followup_query)
+        chat = ChatMessage(role="bot", message=f"Follow-up Response: {followup_response}")
+        db.session.add(chat)
+        db.session.commit()
     return redirect(url_for('index'))
 
 @app.route("/video", methods=["POST"])
@@ -143,7 +154,6 @@ def video():
             chat = ChatMessage(role="bot", message=f"Video result: {video_result}")
             db.session.add(chat)
             db.session.commit()
-
     return redirect(url_for('index'))
 
 @app.route("/clear", methods=["POST"])
@@ -159,7 +169,6 @@ def detect_language(text):
     """
     Detect language using googletrans.
     """
-    translator = Translator()
     detected_lang = translator.detect(text).lang
     return 'ta' if detected_lang == 'ta' else 'en'
 

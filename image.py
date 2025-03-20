@@ -1,74 +1,114 @@
-from PIL import Image
 import os
-import torch
-from transformers import VisionEncoderDecoderModel, ViTFeatureExtractor, AutoTokenizer, pipeline
-import pollinations as ai
+import asyncio
+from PIL import Image
+from dotenv import load_dotenv
+import google.generativeai as genai
+import nest_asyncio
 
-# Initialize the image captioning model (PyTorch-based)
-caption_model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
-feature_extractor = ViTFeatureExtractor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
-tokenizer = AutoTokenizer.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+# Apply nest_asyncio to allow nested async calls in environments that require it
+nest_asyncio.apply()
 
-# Initialize the text generation pipeline using GPT-2 (CPU-based)
-text_generator = pipeline("text-generation", model="gpt2", device=-1)
+# Load environment variables from .env file
+load_dotenv()
+
+# Configure the Gemini API key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+# Initialize Gemini models for vision and text tasks
+gemini_vision = genai.GenerativeModel('gemini-1.5-flash')
+gemini_text = genai.GenerativeModel('gemini-1.5-pro')
 
 def analyze_image(image_path):
     """
-    Analyze an image using a PyTorch-based image captioning model.
-    Returns a caption that describes the image.
+    Analyze an agricultural image using the Gemini vision model.
+    Returns a caption describing field conditions, crop health, and any issues.
     """
     try:
         image = Image.open(image_path)
         if image.mode != "RGB":
             image = image.convert("RGB")
-        pixel_values = feature_extractor(images=[image], return_tensors="pt").pixel_values
-        # Generate caption with the image captioning model
-        output_ids = caption_model.generate(pixel_values, max_length=16, num_beams=4)
-        caption = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+        
+        prompt = (
+            "Analyze this agricultural image and provide a brief caption describing the field conditions, "
+            "crop health, and any visible issues."
+        )
+        
+        async def async_analyze():
+            response = await gemini_vision.generate_content_async([prompt, image])
+            return response.text
+        
+        # Directly run the async function without a custom event loop function
+        caption = asyncio.run(async_analyze())
         return caption
     except Exception as e:
         return f"Error in image analysis: {str(e)}"
 
 def generate_solution_from_analysis(analysis_text):
     """
-    Generate a solution text based on the image analysis using GPT-2.
+    Generate a detailed solution based on the agricultural image analysis using the Gemini text model.
     """
     try:
         prompt = (
-            f"Based on the following image analysis, provide a detailed solution to address the issue:\n"
-            f"{analysis_text}\nSolution:"
+            f"Based on the following agricultural image analysis, provide a detailed solution addressing any identified issues "
+            f"or recommendations for improvement. Do not include any copyrighted content.\n\n"
+            f"Analysis:\n{analysis_text}\n\nSolution:"
         )
-        output = text_generator(prompt, max_length=100, num_return_sequences=1)
-        solution_text = output[0]['generated_text']
+        
+        async def async_generate():
+            response = await gemini_text.generate_content_async(prompt)
+            return response.text
+        
+        solution_text = asyncio.run(async_generate())
         return solution_text
     except Exception as e:
         return f"Error in generating solution: {str(e)}"
 
 def generate_solution_image(solution_text, output_path="solution_image.jpg"):
     """
-    Generate an image representing the solution using Pollinations AI.
+    Generate an image representing the solution using the Gemini vision model.
+    Returns the file path of the generated image.
     """
     try:
-        model_obj = ai.Model()
-        # Construct a prompt for Pollinations AI image generation
-        prompt = f"{solution_text} {ai.realistic}"
-        # Generate image using Pollinations AI (this runs on CPU and does not require a GPU)
-        image = model_obj.generate(
-            prompt=prompt,
-            model=ai.flux,
-            width=1024,
-            height=1024,
-            seed=42
+        prompt = (
+            f"Create a realistic agricultural field image that visually represents the following solution: {solution_text}"
         )
-        image.save(output_path)
+        
+        async def async_generate():
+            response = await gemini_vision.generate_content_async(prompt)
+            # Assumes the response contains an image object in the 'image' attribute
+            return response.image
+        
+        generated_image = asyncio.run(async_generate())
+        generated_image.save(output_path)
         return output_path
     except Exception as e:
         return f"Error in generating solution image: {str(e)}"
 
+def generate_follow_up_response(context, follow_up_query):
+    """
+    Generate a follow-up response based on a given context (such as a previous solution or analysis)
+    and a follow-up query.
+    """
+    try:
+        prompt = (
+            f"Based on the following context:\n{context}\n\n"
+            f"And the follow-up question:\n{follow_up_query}\n\n"
+            "Provide a detailed follow-up response with additional insights or recommendations."
+        )
+        
+        async def async_followup():
+            response = await gemini_text.generate_content_async(prompt)
+            return response.text
+        
+        follow_up_response = asyncio.run(async_followup())
+        return follow_up_response
+    except Exception as e:
+        return f"Error in generating follow-up response: {str(e)}"
+
 def analyze_and_generate_solution(image_path, solution_image_output="solution_image.jpg"):
     """
-    Analyzes the uploaded image, generates a solution text, and creates an image representing the solution.
-    Returns a tuple (solution_text, solution_image_path).
+    Analyzes the provided agricultural image, generates a solution text, and creates an image representing the solution.
+    Returns a tuple: (solution_text, solution_image_path).
     """
     analysis = analyze_image(image_path)
     if analysis.startswith("Error"):
