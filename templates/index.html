@@ -88,6 +88,14 @@
           <div class="status">Online</div>
         </div>
       </div>
+        <!-- Language Selection Form -->
+      <form action="/set_language" method="POST" class="language-form">
+       <select name="language" onchange="this.form.submit()">
+        <option value="en" {% if session.get('default_language', 'en') == 'en' %}selected{% endif %}>English</option>
+        <option value="hi" {% if session.get('default_language') == 'hi' %}selected{% endif %}>Hindi</option>
+        <option value="ta" {% if session.get('default_language') == 'ta' %}selected{% endif %}>Tamil</option>
+      </select>
+    </form>
       <form action="/clear" method="POST" class="clear-form">
         <button type="submit" class="clear-btn">🗑️</button>
       </form>
@@ -100,7 +108,8 @@
         {{ chat.message | safe }}
         {% if chat.role == 'bot' %}
           {% if '<audio' not in chat.message %}
-            <button class="speak-btn" onclick='speakMessage({{ chat.message | tojson }}, "{{ 'ta-IN' if 'தமிழ்' in chat.message else 'en-IN' }}")'>🔊</button>
+          <button class="speak-btn" onclick="speakMessage({{ chat.message | tojson }}, '{{ 'ta-IN' if 'தமிழ்' in chat.message else 'en-IN' }}')">🔊</button>
+
           {% endif %}
         {% endif %}
       </div>

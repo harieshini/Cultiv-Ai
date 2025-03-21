@@ -1,5 +1,5 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, session
 from config import UPLOAD_FOLDER, DATABASE_URI
 from models import db, ChatMessage
 from text import is_valid_question, generate_text_response
@@ -14,6 +14,7 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.secret_key = 'your_secret_key_here'  # Ensure you set a strong secret key
 
 db.init_app(app)
 with app.app_context():
@@ -43,7 +44,7 @@ def index():
                 db.session.add(bot_chat)
                 db.session.commit()
 
-                # Convert bot response to audio
+                # Convert bot response to audio using the detected language
                 audio_file = save_audio(bot_response, detect_language(user_message))
                 if audio_file:
                     audio_message = ChatMessage(
@@ -59,16 +60,13 @@ def index():
         elif 'audio' in request.files:
             audio_file = request.files['audio']
             if audio_file:
-                # Process the audio file to get the Gemini response and corresponding audio file path
                 result = process_audio(audio_file)
-                # Expecting a tuple: (gemini_response, audio_file_path)
                 if isinstance(result, tuple):
                     gemini_response, audio_file_path = result
                 else:
                     gemini_response = result
                     audio_file_path = None
 
-                # Save an indicator for user audio input and the bot's response
                 user_chat = ChatMessage(role="user", message="(audio message received)")
                 db.session.add(user_chat)
                 bot_chat = ChatMessage(role="bot", message=gemini_response)
@@ -84,16 +82,11 @@ def index():
                 db.session.commit()
                 return redirect(url_for("index"))
 
-    # GET request: Show chat history
     chats = ChatMessage.query.order_by(ChatMessage.timestamp.asc()).all()
     return render_template("index.html", chats=chats)
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    """
-    Handles image uploads: analyzes the image, generates a solution text and a solution image,
-    then stores the solution as bot messages in the chat.
-    """
     if 'file' in request.files:
         file = request.files['file']
         if file.filename != '' and file.filename.split('.')[-1].lower() in ALLOWED_EXTENSIONS:
@@ -101,18 +94,15 @@ def upload():
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
 
-            # Define output path for the generated solution image (prepend 'solution_' to the filename)
             solution_image_path = os.path.join(app.config['UPLOAD_FOLDER'], f"solution_{filename}")
 
             solution_text, generated_image_path = analyze_and_generate_solution(
                 file_path, solution_image_output=solution_image_path
             )
 
-            # Save solution text to chat
             bot_text_message = ChatMessage(role="bot", message=f"Solution: {solution_text}")
             db.session.add(bot_text_message)
 
-            # Save generated image to chat if generation was successful
             if generated_image_path and not generated_image_path.startswith("Error"):
                 bot_image_message = ChatMessage(
                     role="bot",
@@ -125,10 +115,6 @@ def upload():
 
 @app.route("/followup_image", methods=["POST"])
 def followup_image():
-    """
-    Handles follow-up queries for an image analysis.
-    The form should pass both the follow-up query and the previous context (e.g. the solution text).
-    """
     followup_query = request.form.get("followup_query")
     context = request.form.get("context")
     if followup_query and context:
@@ -140,9 +126,6 @@ def followup_image():
 
 @app.route("/video", methods=["POST"])
 def video():
-    """
-    Handles video uploads and processes them.
-    """
     if 'video' in request.files:
         video_file = request.files['video']
         if video_file:
@@ -158,24 +141,25 @@ def video():
 
 @app.route("/clear", methods=["POST"])
 def clear():
-    """
-    Clears all chat messages from the database.
-    """
     ChatMessage.query.delete()
     db.session.commit()
     return redirect(url_for('index'))
 
+@app.route("/set_language", methods=["POST"])
+def set_language():
+    selected_language = request.form.get("language")
+    if selected_language:
+        session['default_language'] = selected_language
+    return redirect(url_for("index"))
+
 def detect_language(text):
-    """
-    Detect language using googletrans.
-    """
+    # Use the default language from session if it exists.
+    if 'default_language' in session:
+        return session['default_language']
     detected_lang = translator.detect(text).lang
     return 'ta' if detected_lang == 'ta' else 'en'
 
 def save_audio(text, lang):
-    """
-    Converts text to speech and saves it as an audio file.
-    """
     try:
         audio = gTTS(text=text, lang=lang)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'response.mp3')
