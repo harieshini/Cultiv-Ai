@@ -104,6 +104,12 @@ body {
   border: 2px solid #66bb6a; /* Lighter green border */
 }
 
+/* Style for images within chat messages */
+.chat-message img {
+  max-width: 100%;
+  border-radius: 12px;
+}
+
 /* Typing Indicator */
 .typing-indicator {
   font-style: italic;

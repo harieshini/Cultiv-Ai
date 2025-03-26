@@ -145,6 +145,13 @@ def upload():
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
 
+            # Display the uploaded image in the chat
+            # Assuming UPLOAD_FOLDER is set to a subfolder of 'static', e.g. "static/uploads"
+            relative_path = os.path.join(app.config['UPLOAD_FOLDER'], filename).replace("\\", "/")
+            user_image_msg = ChatMessage(role="user", message=f"<img src='/{relative_path}' alt='Uploaded Image' />")
+            db.session.add(user_image_msg)
+            db.session.commit()
+
             # Analyze image and store the analysis in session
             analysis = analyze_and_store_image(file_path)
             session['image_analysis'] = analysis
