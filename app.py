@@ -1,5 +1,6 @@
-import os 
+import os  
 import time
+import uuid
 from flask import Flask, render_template, request, redirect, url_for, session
 from config import UPLOAD_FOLDER, DATABASE_URI
 from models import db, ChatMessage
@@ -16,11 +17,12 @@ from video import process_video
 from werkzeug.utils import secure_filename
 from googletrans import Translator
 from gtts import gTTS
+from PIL import Image
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER  # e.g. "static/uploads"
 app.secret_key = 'your_secret_key_here'  # Ensure you set a strong secret key
 
 db.init_app(app)
@@ -28,8 +30,24 @@ with app.app_context():
     db.create_all()
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
-
 translator = Translator()
+
+def detect_language(text):
+    if 'default_language' in session:
+        return session['default_language']
+    detected_lang = translator.detect(text).lang
+    return detected_lang if detected_lang in ['ta', 'en'] else 'en'
+
+def save_audio(text, lang):
+    try:
+        audio = gTTS(text=text, lang=lang)
+        unique_name = f"response_{uuid.uuid4().hex}.mp3"
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_name)
+        audio.save(file_path)
+        return f"{app.config['UPLOAD_FOLDER']}/{unique_name}"
+    except Exception as e:
+        print(f"Error generating audio: {e}")
+        return None
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -48,11 +66,12 @@ def index():
                 lower_msg = user_message.lower()
                 # Check for custom image generation commands
                 if "generate an image" in lower_msg:
+                    # Generate custom image and display with input text
                     custom_image_path = generate_custom_image(user_message)
                     if not custom_image_path.startswith("Error"):
                         bot_msg = ChatMessage(
                             role="bot", 
-                            message=f"<img src='/{custom_image_path}' alt='Custom Generated Image' />"
+                            message=f"<div class='image-container'><div class='input-text'>Input: {user_message}</div><img src='/{custom_image_path}' alt='Custom Generated Image'/><a class='download-btn' href='/{custom_image_path}' download>Download Image</a></div>"
                         )
                     else:
                         bot_msg = ChatMessage(role="bot", message=custom_image_path)
@@ -64,7 +83,7 @@ def index():
                     if not image_from_text.startswith("Error"):
                         bot_msg = ChatMessage(
                             role="bot", 
-                            message=f"<img src='/{image_from_text}' alt='Text as Image' />"
+                            message=f"<div class='image-container'><div class='input-text'>Input: {user_message}</div><img src='/{image_from_text}' alt='Text as Image'/><a class='download-btn' href='/{image_from_text}' download>Download Image</a></div>"
                         )
                     else:
                         bot_msg = ChatMessage(role="bot", message=image_from_text)
@@ -141,14 +160,14 @@ def upload():
     if 'file' in request.files:
         file = request.files['file']
         if file.filename != '' and file.filename.split('.')[-1].lower() in ALLOWED_EXTENSIONS:
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            # Generate unique filename for the uploaded image
+            unique_filename = f"{uuid.uuid4().hex}_{secure_filename(file.filename)}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
             file.save(file_path)
 
-            # Display the uploaded image in the chat
-            # Assuming UPLOAD_FOLDER is set to a subfolder of 'static', e.g. "static/uploads"
-            relative_path = os.path.join(app.config['UPLOAD_FOLDER'], filename).replace("\\", "/")
-            user_image_msg = ChatMessage(role="user", message=f"<img src='/{relative_path}' alt='Uploaded Image' />")
+            # Display the uploaded image along with the original filename
+            relative_path = file_path.replace("\\", "/")
+            user_image_msg = ChatMessage(role="user", message=f"<div class='image-container'><div class='input-text'>Uploaded: {file.filename}</div><img src='/{relative_path}' alt='Uploaded Image'/><a class='download-btn' href='/{relative_path}' download>Download Image</a></div>")
             db.session.add(user_image_msg)
             db.session.commit()
 
@@ -177,9 +196,22 @@ def generate_solution():
     chat_text = ChatMessage(role="bot", message=f"Solution: {solution_text}")
     db.session.add(chat_text)
     if solution_image_path and not solution_image_path.startswith("Error"):
+        # Crop the generated solution image to 1024x955 (center crop)
+        try:
+            img = Image.open(solution_image_path)
+            width, height = img.size
+            new_width, new_height = 1024, 955
+            left = (width - new_width) / 2 if width > new_width else 0
+            top = (height - new_height) / 2 if height > new_height else 0
+            right = left + new_width
+            bottom = top + new_height
+            cropped = img.crop((left, top, right, bottom))
+            cropped.save(solution_image_path)
+        except Exception as e:
+            print(f"Error cropping image: {e}")
         chat_image = ChatMessage(
             role="bot",
-            message=f"<img src='/{solution_image_path}' alt='Solution Image' />"
+            message=f"<div class='image-container'><div class='input-text'>Context: {analysis}</div><img src='/{solution_image_path}' alt='Solution Image'/><a class='download-btn' href='/{solution_image_path}' download>Download Image</a></div>"
         )
         db.session.add(chat_image)
     db.session.commit()
@@ -192,7 +224,6 @@ def generate_solution():
 @app.route("/followup_image", methods=["POST"])
 def followup_image():
     followup_query = request.form.get("followup_query")
-    # If context is not provided, use stored analysis
     context = request.form.get("context") or session.get("image_analysis", "")
     if followup_query and context:
         followup_response = generate_follow_up_response(context, followup_query)
@@ -210,8 +241,8 @@ def video():
     if 'video' in request.files:
         video_file = request.files['video']
         if video_file:
-            filename = secure_filename(video_file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            unique_filename = f"{uuid.uuid4().hex}_{secure_filename(video_file.filename)}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
             video_file.save(file_path)
 
             status_message = "Processing video analysis..."
@@ -239,22 +270,6 @@ def set_language():
     if selected_language:
         session['default_language'] = selected_language
     return redirect(url_for("index"))
-
-def detect_language(text):
-    if 'default_language' in session:
-        return session['default_language']
-    detected_lang = translator.detect(text).lang
-    return detected_lang if detected_lang in ['ta', 'en'] else 'en'
-
-def save_audio(text, lang):
-    try:
-        audio = gTTS(text=text, lang=lang)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], 'response.mp3')
-        audio.save(file_path)
-        return f"static/uploads/response.mp3"
-    except Exception as e:
-        print(f"Error generating audio: {e}")
-        return None
 
 if __name__ == "__main__":
     app.run(debug=True)

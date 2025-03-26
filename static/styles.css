@@ -7,8 +7,8 @@
 }
 
 body {
-  background-color: #e8f5e9; /* Light green background */
-  color: #333333; /* Dark text for better readability */
+  background-color: #e8f5e9;
+  color: #333333;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -20,7 +20,7 @@ body {
   width: 100%;
   max-width: 600px;
   height: 80vh;
-  background-color: #ffffff; /* White background for chat container */
+  background-color: #ffffff;
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
   display: flex;
@@ -34,7 +34,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  background-color: #4caf50; /* Green navbar */
+  background-color: #4caf50;
   color: #ffffff;
 }
 
@@ -57,7 +57,7 @@ body {
 
 .status {
   font-size: 14px;
-  color: #d0e9c6; /* Lighter green for status */
+  color: #d0e9c6;
 }
 
 .clear-btn {
@@ -68,7 +68,7 @@ body {
   font-size: 24px;
 }
 
-/* Chat Box with Background Image */
+/* Chat Box */
 .chat-box {
   flex-grow: 1;
   padding: 16px;
@@ -91,29 +91,52 @@ body {
 }
 
 .chat-message.bot {
-  background-color: #c8e6c9; /* Light green for bot messages */
-  align-self: flex-start; /* Bot messages on left */
+  background-color: #c8e6c9;
+  align-self: flex-start;
   color: #333333;
-  border: 2px solid #4caf50; /* Darker green border */
+  border: 2px solid #4caf50;
 }
 
 .chat-message.user {
-  background-color: #81c784; /* Medium green for user messages */
-  align-self: flex-end; /* User messages on right */
+  background-color: #81c784;
+  align-self: flex-end;
   color: #ffffff;
-  border: 2px solid #66bb6a; /* Lighter green border */
+  border: 2px solid #66bb6a;
 }
 
-/* Style for images within chat messages */
-.chat-message img {
+/* Image Container */
+.image-container {
+  position: relative;
+  display: inline-block;
+}
+.image-container img {
   max-width: 100%;
   border-radius: 12px;
+  display: block;
+}
+.image-container .input-text {
+  margin-bottom: 4px;
+  font-size: 14px;
+  color: #333;
+}
+
+/* Download Button Positioned at Bottom Right */
+.download-btn {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background-color: rgba(76, 175, 80, 0.8);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 12px;
 }
 
 /* Typing Indicator */
 .typing-indicator {
   font-style: italic;
-  color: #4caf50; /* Green typing indicator */
+  color: #4caf50;
   margin: 8px;
   display: none;
 }
@@ -140,29 +163,26 @@ body {
 .input-box {
   display: flex;
   padding: 16px;
-  background-color: #f1f8e9; /* Light background for input box */
+  background-color: #f1f8e9;
   align-items: center;
 }
-
 .input-form {
   flex-grow: 1;
   display: flex;
   align-items: center;
 }
-
 .input-form input[type="text"] {
   flex-grow: 1;
   padding: 14px;
   border-radius: 24px;
-  background-color: #e8f5e9; /* Light green input */
+  background-color: #e8f5e9;
   color: #333333;
   border: none;
   margin-right: 12px;
   font-size: 16px;
 }
-
 .input-form button {
-  background-color: #4caf50; /* Green button */
+  background-color: #4caf50;
   color: #ffffff;
   border: none;
   padding: 12px 20px;
@@ -175,28 +195,25 @@ body {
 .upload-form label,
 .audio-form label {
   font-size: 24px;
-  color: #4caf50; /* Green for upload buttons */
+  color: #4caf50;
   cursor: pointer;
   margin-left: 12px;
 }
-
 .upload-form label:hover,
 .audio-form label:hover {
-  color: #66bb6a; /* Lighter green on hover */
+  color: #66bb6a;
 }
 
 /* Scrollbar */
 .chat-box::-webkit-scrollbar {
   width: 6px;
 }
-
 .chat-box::-webkit-scrollbar-thumb {
-  background-color: #4caf50; /* Green scrollbar thumb */
+  background-color: #4caf50;
   border-radius: 12px;
 }
-
 .chat-box::-webkit-scrollbar-track {
-  background-color: #e8f5e9; /* Light green track */
+  background-color: #e8f5e9;
 }
 
 /* Responsive Design */
@@ -206,44 +223,35 @@ body {
       height: 100vh;
       border-radius: 0;
   }
-
   .navbar {
       padding: 12px;
-      flex-direction: column; /* Stack items vertically */
-      align-items: flex-start; /* Align items to the start */
+      flex-direction: column;
+      align-items: flex-start;
   }
-
   .user-info {
-      margin-bottom: 8px; /* Space between user info and clear button */
+      margin-bottom: 8px;
   }
-
   .avatar {
       width: 40px;
       height: 40px;
   }
-
   .username {
       font-size: 16px;
   }
-
   .status {
       font-size: 12px;
   }
-
   .input-box {
       padding: 12px;
   }
-
   .input-form input[type="text"] {
       font-size: 14px;
       padding: 10px;
   }
-
   .input-form button {
       font-size: 14px;
       padding: 10px 16px;
   }
-
   .upload-form label,
   .audio-form label {
       font-size: 20px;
@@ -255,29 +263,23 @@ body {
       width: 600px;
       height: 80vh;
   }
-
   .navbar {
       padding: 16px;
   }
-
   .avatar {
       width: 50px;
       height: 50px;
   }
-
   .username {
       font-size: 18px;
   }
-
   .status {
       font-size: 14px;
   }
-
   .input-form input[type="text"] {
       font-size: 16px;
       padding: 14px;
   }
-
   .input-form button {
       font-size: 16px;
       padding: 12px 20px;
@@ -288,13 +290,12 @@ body {
 .speak-btn {
   background-color: transparent;
   border: none;
-  color: #4caf50; /* Green for speaker button */
+  color: #4caf50;
   font-size: 18px;
   cursor: pointer;
   margin-left: 8px;
   transition: color 0.2s ease;
 }
-
 .speak-btn:hover {
-  color: #66bb6a; /* Lighter green on hover */
+  color: #66bb6a;
 }

@@ -1,82 +1,65 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cultiv-Ai</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-
   <script>
     let mediaRecorder;
     let audioChunks = [];
-
-    // Simulate typing indicator
     function showTypingIndicator() {
       document.getElementById('typing-indicator').style.display = 'block';
     }
     function hideTypingIndicator() {
       document.getElementById('typing-indicator').style.display = 'none';
     }
-
-    // Trigger send on Enter key press
     function checkEnter(event) {
       if (event.key === 'Enter') {
         event.preventDefault();
         document.getElementById('send-btn').click();
       }
     }
-
-    // Text-to-Speech function for bot messages
     function speakMessage(message, lang) {
       const utterance = new SpeechSynthesisUtterance(message);
-      utterance.lang = lang || 'en-IN'; // Default to English (India)
-      window.speechSynthesis.speak(utterance);
+      // Only speak if message does not contain an image
+      if (message.indexOf('<img') === -1) {
+        utterance.lang = lang || 'en-IN';
+        window.speechSynthesis.speak(utterance);
+      }
     }
-
-    // Record audio using mic
     async function toggleRecording() {
       const recordBtn = document.getElementById('record-btn');
-
       if (!mediaRecorder || mediaRecorder.state === 'inactive') {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           mediaRecorder = new MediaRecorder(stream);
-
           audioChunks = [];
-
           mediaRecorder.ondataavailable = (event) => {
             audioChunks.push(event.data);
           };
-
           mediaRecorder.onstop = async () => {
             const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
             const formData = new FormData();
             formData.append('audio', audioBlob, 'recording.wav');
-
-            // Send audio data to backend
             await fetch('/', { method: 'POST', body: formData });
-
             audioChunks = [];
             hideTypingIndicator();
-            window.location.reload(); // Refresh to show response
+            window.location.reload();
           };
-
           mediaRecorder.start();
-          recordBtn.textContent = '⏹️'; // Change icon to stop button
+          recordBtn.textContent = '⏹️';
           showTypingIndicator();
-
         } catch (error) {
           console.error('Error accessing microphone:', error);
         }
       } else {
         mediaRecorder.stop();
-        recordBtn.textContent = '🎙️'; // Reset to mic icon
+        recordBtn.textContent = '🎙️';
       }
     }
   </script>
 </head>
-
 <body>
   <div class="chat-container">
     <!-- Navbar -->
@@ -88,7 +71,6 @@
           <div class="status">Online</div>
         </div>
       </div>
-      <!-- Language Selection Form -->
       <form action="/set_language" method="POST" class="language-form">
         <select name="language" onchange="this.form.submit()">
           <option value="en" {% if session.get('default_language', 'en') == 'en' %}selected{% endif %}>English</option>
@@ -100,24 +82,19 @@
         <button type="submit" class="clear-btn">🗑️</button>
       </form>
     </nav>
-
     <!-- Chat Box -->
     <div class="chat-box" id="chat-box">
       {% for chat in chats %}
       <div class="chat-message {{ 'user' if chat.role == 'user' else 'bot' }}">
         {{ chat.message | safe }}
-        {% if chat.role == 'bot' %}
-          {% if '<audio' not in chat.message %}
+        {% if chat.role == 'bot' and '<img' not in chat.message %}
           <button class="speak-btn" onclick="speakMessage({{ chat.message | tojson }}, '{{ 'ta-IN' if session.get('default_language') == 'ta' else 'en-IN' }}')">🔊</button>
-          {% endif %}
         {% endif %}
       </div>
       {% endfor %}
-      <!-- Typing Indicator (hidden by default) -->
       <div id="typing-indicator" class="typing-indicator" style="display: none;">Typing...</div>
     </div>
-
-    <!-- Generate Solution Button (displayed if context is available) -->
+    <!-- Generate Solution Button -->
     {% if session.get("show_generate_solution") %}
     <form action="/generate_solution" method="POST" class="solution-form">
       <button type="submit" id="generate-solution-btn">
@@ -131,27 +108,19 @@
       </button>
     </form>
     {% endif %}
-
     <!-- Input Box -->
     <div class="input-box">
-      <!-- Text Input Form -->
       <form action="/" method="POST" class="input-form">
         <input id="message-input" type="text" name="message" placeholder="Type a message..." onkeypress="checkEnter(event)" autocomplete="off">
         <button type="submit" id="send-btn" onclick="showTypingIndicator()">➤</button>
       </form>
-
-      <!-- Image Upload Form -->
       <form action="/upload" method="POST" enctype="multipart/form-data" class="upload-form">
         <input type="file" name="file" id="file" hidden onchange="this.form.submit()">
         <label for="file">📎</label>
       </form>
-
-      <!-- Audio Upload Form (for recorded files) -->
       <form id="audio-form" method="POST" enctype="multipart/form-data" class="audio-form">
         <button type="button" id="record-btn" onclick="toggleRecording()">🎙️</button>
       </form>
-
-      <!-- Video Upload Form -->
       <form action="/video" method="POST" enctype="multipart/form-data" class="video-form">
         <input type="file" name="video" id="video" hidden onchange="this.form.submit()">
         <label for="video">📹</label>

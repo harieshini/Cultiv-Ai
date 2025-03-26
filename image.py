@@ -1,7 +1,11 @@
 import os
 import asyncio
 import threading
+import requests
+import uuid
+from urllib.parse import quote
 from PIL import Image
+from io import BytesIO
 from dotenv import load_dotenv
 import google.generativeai as genai
 import nest_asyncio
@@ -51,16 +55,13 @@ def analyze_image(image_path):
         image = Image.open(image_path)
         if image.mode != "RGB":
             image = image.convert("RGB")
-        
         prompt = (
             "Analyze this agricultural image and provide a brief caption describing the field conditions, "
             "crop health, and any visible issues."
         )
-        
         async def async_analyze():
             response = await gemini_vision.generate_content_async([prompt, image])
             return response.text
-        
         caption = run_async(async_analyze())
         return caption
     except Exception as e:
@@ -92,21 +93,18 @@ def generate_solution_from_analysis(context_text):
             f"or recommendations for improvement. Do not include any copyrighted content.\n\n"
             f"Context:\n{context_text}\n\nSolution:"
         )
-        
         async def async_generate():
             response = await gemini_text.generate_content_async(prompt)
             return response.text
-        
         solution_text = run_async(async_generate())
         target_lang = session.get('default_language', 'en')
         if target_lang != 'en':
             solution_text = translator.translate(solution_text, dest=target_lang).text
-            
         return solution_text
     except Exception as e:
         return f"Error in generating solution text: {str(e)}"
 
-def generate_solution_image(solution_text, output_path="solution_image.jpg"):
+def generate_solution_image(solution_text, output_path=None):
     """
     Generate an image representing the solution using the Gemini vision model.
     Returns the file path of the generated image or a friendly message if generation fails.
@@ -117,13 +115,12 @@ def generate_solution_image(solution_text, output_path="solution_image.jpg"):
         prompt = (
             f"Create a realistic agricultural field image that visually represents the following solution: {solution_text}"
         )
-        
         async def async_generate():
             response = await gemini_vision.generate_content_async(prompt)
-            # Assumes the response contains an image object in the 'image' attribute
             return response.image
-        
         generated_image = run_async(async_generate())
+        if not output_path:
+            output_path = os.path.join("static", "uploads", f"solution_image_{uuid.uuid4().hex}.jpg")
         generated_image.save(output_path)
         return output_path
     except Exception as e:
@@ -145,16 +142,13 @@ def generate_follow_up_response(context, follow_up_query):
             f"And the follow-up question:\n{follow_up_query}\n\n"
             "Provide a detailed follow-up response with additional insights or recommendations."
         )
-        
         async def async_followup():
             response = await gemini_text.generate_content_async(prompt)
             return response.text
-        
         follow_up_response = run_async(async_followup())
         target_lang = session.get('default_language', 'en')
         if target_lang != 'en':
             follow_up_response = translator.translate(follow_up_response, dest=target_lang).text
-        
         return follow_up_response
     except Exception as e:
         return f"Error in generating follow-up response: {str(e)}"
@@ -175,30 +169,29 @@ def generate_solution_response(context_text):
     """
     if not context_text or context_text.startswith("Error"):
         return "No valid context available to generate a solution.", None
-
     solution_text = generate_solution_from_analysis(context_text)
     if solution_text.startswith("Error"):
         return solution_text, None
-
     solution_image = generate_solution_image(solution_text)
     if isinstance(solution_image, str) and solution_image.startswith("Error"):
         return solution_text, None
-    
     return solution_text, solution_image
 
 def generate_custom_image(prompt):
     """
-    Generates an image for a custom prompt when the user instructs (e.g., using keywords like 'generate an image').
+    Generates an image for a custom prompt using the Pollinations AI API.
     Returns the path of the generated image or a friendly error message.
     """
     try:
-        async def async_generate():
-            response = await gemini_vision.generate_content_async(prompt)
-            return response.image
-        generated_image = run_async(async_generate())
-        output_path = "custom_generated_image.jpg"
-        generated_image.save(output_path)
-        return output_path
+        url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?format=png"
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200 and response.content:
+            output_path = os.path.join("static", "uploads", f"custom_generated_image_{uuid.uuid4().hex}.png")
+            image = Image.open(BytesIO(response.content))
+            image.save(output_path)
+            return output_path
+        else:
+            return f"Error: Unable to generate image, status code {response.status_code}"
     except Exception as e:
         target_lang = session.get('default_language', 'en')
         message = "Image generation prompt is unclear." if target_lang == "en" \
