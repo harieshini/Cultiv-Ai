@@ -88,14 +88,14 @@
           <div class="status">Online</div>
         </div>
       </div>
-        <!-- Language Selection Form -->
+      <!-- Language Selection Form -->
       <form action="/set_language" method="POST" class="language-form">
-       <select name="language" onchange="this.form.submit()">
-        <option value="en" {% if session.get('default_language', 'en') == 'en' %}selected{% endif %}>English</option>
-        <option value="hi" {% if session.get('default_language') == 'hi' %}selected{% endif %}>Hindi</option>
-        <option value="ta" {% if session.get('default_language') == 'ta' %}selected{% endif %}>Tamil</option>
-      </select>
-    </form>
+        <select name="language" onchange="this.form.submit()">
+          <option value="en" {% if session.get('default_language', 'en') == 'en' %}selected{% endif %}>English</option>
+          <option value="hi" {% if session.get('default_language') == 'hi' %}selected{% endif %}>Hindi</option>
+          <option value="ta" {% if session.get('default_language') == 'ta' %}selected{% endif %}>Tamil</option>
+        </select>
+      </form>
       <form action="/clear" method="POST" class="clear-form">
         <button type="submit" class="clear-btn">🗑️</button>
       </form>
@@ -108,8 +108,7 @@
         {{ chat.message | safe }}
         {% if chat.role == 'bot' %}
           {% if '<audio' not in chat.message %}
-          <button class="speak-btn" onclick="speakMessage({{ chat.message | tojson }}, '{{ 'ta-IN' if 'தமிழ்' in chat.message else 'en-IN' }}')">🔊</button>
-
+          <button class="speak-btn" onclick="speakMessage({{ chat.message | tojson }}, '{{ 'ta-IN' if session.get('default_language') == 'ta' else 'en-IN' }}')">🔊</button>
           {% endif %}
         {% endif %}
       </div>
@@ -117,6 +116,21 @@
       <!-- Typing Indicator (hidden by default) -->
       <div id="typing-indicator" class="typing-indicator" style="display: none;">Typing...</div>
     </div>
+
+    <!-- Generate Solution Button (displayed if context is available) -->
+    {% if session.get("show_generate_solution") %}
+    <form action="/generate_solution" method="POST" class="solution-form">
+      <button type="submit" id="generate-solution-btn">
+        {% if session.get('default_language') == 'ta' %}
+          தீர்வு உருவாக்கு
+        {% elif session.get('default_language') == 'hi' %}
+          समाधान उत्पन्न करें
+        {% else %}
+          Generate Solution
+        {% endif %}
+      </button>
+    </form>
+    {% endif %}
 
     <!-- Input Box -->
     <div class="input-box">
@@ -144,6 +158,5 @@
       </form>
     </div>
   </div>
-
 </body>
 </html>

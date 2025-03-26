@@ -2,7 +2,7 @@ import re
 import google.generativeai as genai
 from config import GEMINI_API_KEY
 from googletrans import Translator
-from flask import session  # Import session to use default language
+from flask import session
 
 # Configure API Key for Gemini
 genai.configure(api_key=GEMINI_API_KEY)
@@ -25,6 +25,7 @@ model = genai.GenerativeModel(
 )
 
 def clean_and_localize(answer, lang):
+    # Remove unnecessary asterisks, extra newlines, and any URLs.
     answer = re.sub(r'\*\*', '', answer)
     answer = re.sub(r'\n+', '\n', answer).strip()
     answer = re.sub(r'http\S+', '', answer)
@@ -66,6 +67,19 @@ def clean_and_localize(answer, lang):
         answer = answer.replace(key, value)
     return answer
 
+def format_answer(answer):
+    """
+    Formats the answer to improve readability by ensuring proper indentation for bullet points.
+    """
+    lines = answer.splitlines()
+    formatted_lines = []
+    for line in lines:
+        line = line.strip()
+        if line.startswith("-"):
+            line = "    " + line  # Indent bullet points
+        formatted_lines.append(line)
+    return "\n".join(formatted_lines)
+
 def is_valid_question(question):
     classification_prompt = (
         "Determine if the following question is about agriculture (covering crops, livestock, soil, irrigation, pest control, or agroeconomics). "
@@ -81,24 +95,18 @@ def is_valid_question(question):
         return False
 
 def generate_text_response(prompt):
-    prompt_lower = prompt.lower()
-    # Check for explicit language instructions
-    if "in tamil" in prompt_lower:
-        target_lang = "ta"
-        prompt = re.sub(r"in tamil", "", prompt, flags=re.IGNORECASE).strip()
-    elif "in hindi" in prompt_lower:
-        target_lang = "hi"
-        prompt = re.sub(r"in hindi", "", prompt, flags=re.IGNORECASE).strip()
-    else:
-        # Use default language from session if set, otherwise detect language
-        target_lang = session.get('default_language')
-        if not target_lang:
-            detected = translator.detect(prompt)
-            target_lang = detected.lang if detected else "en"
-    
-    # Translate prompt to English if needed
-    if target_lang != "en":
-        prompt_en = translator.translate(prompt, dest="en").text
+    # Determine the target language from session (user's selected language) if set.
+    target_lang = session.get('default_language', None)
+    if not target_lang:
+        detected = translator.detect(prompt)
+        target_lang = detected.lang if detected else "en"
+
+    # Detect the original language of the prompt.
+    original_lang = translator.detect(prompt).lang
+
+    # Translate the prompt to English for the model if it is not already English.
+    if original_lang != "en":
+        prompt_en = translator.translate(prompt, src=original_lang, dest="en").text
     else:
         prompt_en = prompt
 
@@ -108,8 +116,11 @@ def generate_text_response(prompt):
     except Exception as e:
         answer = f"Error in text generation: {e}"
     
+    # Translate the answer to the target language if needed.
     if target_lang != "en":
         answer = translator.translate(answer, dest=target_lang).text
-    
+
+    # Clean the response and format for readability.
     answer = clean_and_localize(answer, target_lang)
+    answer = format_answer(answer)
     return answer
